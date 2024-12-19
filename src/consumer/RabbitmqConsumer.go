@@ -2,11 +2,16 @@ package consumer
 
 import (
 	"fmt"
-	"log"
 	"log/slog"
 
+	"github.com/andretop97/Queue_consumer_golang/src/utils"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
+
+type queueConfig struct {
+	dlxName *string
+	msgTTL *int64
+}
 
 type RabbitMQConsumer struct {
 	connection *amqp.Connection
@@ -14,29 +19,19 @@ type RabbitMQConsumer struct {
 	queueName string
 }
 
-func (r *RabbitMQConsumer) createConnection(url string)  error{
+func (r *RabbitMQConsumer) createConnection(url string){
 	conn, err := amqp.Dial(url)
-
-	if err != nil{
-		return err
-	}
-
+	utils.FailOnError(err, "Failed to initialize connection")
 	r.connection = conn
-	return nil
 }
 
-func (r *RabbitMQConsumer) createChannel() error{
+func (r *RabbitMQConsumer) createChannel(){
 	channel, err := r.connection.Channel()
-
-	if err != nil {
-		return err
-	}
-
+	utils.FailOnError(err, "Failed to create channel")
 	r.channel = channel
-	return nil
 }
 
-func (r *RabbitMQConsumer) cretaeExchange(exchangeName string) error {
+func (r *RabbitMQConsumer) cretaeExchange(exchangeName string) {
 	err := r.channel.ExchangeDeclare(
 		exchangeName,
 		"fanout",
@@ -46,15 +41,20 @@ func (r *RabbitMQConsumer) cretaeExchange(exchangeName string) error {
 		false,
 		nil,
 	)
-
-	if err != nil {
-		return err
-	}
-
-	return nil
+	utils.FailOnError(err, "Failed to declare Exchange")
 }
 
-func (r *RabbitMQConsumer) createQueue(queueName string, args amqp.Table) error {
+func (r *RabbitMQConsumer) createQueue(queueName string, queueConfig queueConfig) {
+	args := amqp.Table{}
+
+	if queueConfig.dlxName != nil {
+		args["x-dead-letter-exchange"] = *queueConfig.dlxName
+	}
+
+	if queueConfig.msgTTL != nil {
+		args["x-message-ttl"] = *queueConfig.msgTTL
+	}
+
 	_, err := r.channel.QueueDeclare(
 		queueName,
 		true,
@@ -64,14 +64,10 @@ func (r *RabbitMQConsumer) createQueue(queueName string, args amqp.Table) error 
 		args,
 	)
 
-	if err != nil {
-		return err
-	}
-
-	return nil
+	utils.FailOnError(err, "Failed to declare queue")
 }
 
-func (r *RabbitMQConsumer) createBind(exchangeName string, queueName string) error {
+func (r *RabbitMQConsumer) createBind(exchangeName string, queueName string) {
 	err := r.channel.QueueBind(
 		queueName,
 		"",
@@ -80,64 +76,50 @@ func (r *RabbitMQConsumer) createBind(exchangeName string, queueName string) err
 		nil,
 	)
 
-	if err != nil {
-		return err
-	}
-
-	return nil
+	utils.FailOnError(err, "Failed to create bind between exchange and queue")
 }
 
-func (r *RabbitMQConsumer) createExchangeAndQueueWithBind(exchangeName string, queueName string, args amqp.Table) error{
-	err := r.cretaeExchange(exchangeName)
-	if err != nil {
-		return err
-	}
+func (r *RabbitMQConsumer) createExchangeAndQueueWithBind(exchangeName string, queueName string, queueConfig queueConfig) {
+	r.cretaeExchange(exchangeName)
+	slog.Info(fmt.Sprintf("Exchange %s created successfuly", exchangeName))
+	r.createQueue(queueName, queueConfig)
+	slog.Info(fmt.Sprintf("Queue %s created successfuly", queueName))
+	r.createBind(exchangeName, queueName)
+	slog.Info("Bind created successfuly")
 
-	err = r.createQueue(queueName, args)
-	if err != nil {
-		return err
-	}
+}
 
-	err = r.createBind(exchangeName, queueName)
-	if err != nil {
-		return err
-	}
+func (consumer *RabbitMQConsumer) createSimpleQueue(serviceName string){
+	exchangeName := fmt.Sprintf("%s-exchange", serviceName)
+	queueName := fmt.Sprintf("%s-queue", serviceName)
+	consumer.queueName = queueName
+	consumer.createExchangeAndQueueWithBind(exchangeName, queueName, queueConfig{})
 
-	return nil
+}
+
+func (consumer *RabbitMQConsumer) createQueueWithDlq(serviceName string){
+	exchangeName := fmt.Sprintf("%s-exchange", serviceName)
+	queueName := fmt.Sprintf("%s-queue", serviceName)
+
+	dlxName := fmt.Sprintf("%s-dlx", serviceName)
+	dlqName := fmt.Sprintf("%s-dlq", serviceName)
+
+	qConfig := queueConfig{}
+	qConfig.dlxName = &dlxName
+
+	
+	consumer.createExchangeAndQueueWithBind(dlxName, dlqName, queueConfig{})
+
+	consumer.createExchangeAndQueueWithBind(exchangeName, queueName, qConfig)
 
 }
 
 func NewRabbitMQConsumer(url string, serviceName string) (*RabbitMQConsumer, error) {
 	consumer := new(RabbitMQConsumer)
-	err := consumer.createConnection(url)
+	consumer.createConnection(url)
+	consumer.createChannel()
 
-	if err != nil {
-		return nil, err
-	}
-
-	// defer consumer.connection.Close()
-
-	err = consumer.createChannel()
-
-	if err != nil {
-		return nil, err
-	}
-
-	// defer consumer.channel.Close()
-
-	exchangeName := fmt.Sprintf("%s-exchange", serviceName)
-	queueName := fmt.Sprintf("%s-queue", serviceName)
-	consumer.queueName = queueName
-	
-	// dlxName := fmt.Sprintf("%s-dlx", serviceName)
-	// dlqName := fmt.Sprintf("%s-dlq", serviceName)
-
-	queueConfig := make(amqp.Table)
-
-	err = consumer.createExchangeAndQueueWithBind(exchangeName, queueName, queueConfig)
-	if err != nil {
-		return nil, err
-	}
+	consumer.createQueueWithDlq(serviceName)
 
 	return consumer, nil
 }
@@ -152,15 +134,11 @@ func (r *RabbitMQConsumer) getConsumer(queueName string) <-chan amqp.Delivery {
 		false,
 		nil,
 	)
-	if err != nil {
-		panic(err)
-	}
+	utils.FailOnError(err, "Failed to create consumer")
 	return delivery
 }
 
 func (r *RabbitMQConsumer) Consume(handler func(string) error){
-
-	
 	delivery := r.getConsumer(r.queueName)
 
 	var forever chan struct{}
@@ -173,7 +151,7 @@ func (r *RabbitMQConsumer) Consume(handler func(string) error){
 
 			if err != nil {
 				slog.Error("Erro ao consumir mensagem", "error", err)
-				message.Nack(false, true)
+				message.Nack(false, false)
 				// message.Reject(true)
 			}else{
 				message.Ack(false)
@@ -181,8 +159,15 @@ func (r *RabbitMQConsumer) Consume(handler func(string) error){
 		}
 	}()
 
-	log.Printf(" [*] Waiting for messages. To exit press CTRL+C")
+	slog.Info(" [*] Waiting for messages. To exit press CTRL+C")
 	<-forever
 	
 
+}
+
+func (r *RabbitMQConsumer) StopConsumer(){
+	err := r.channel.Close(); 
+	utils.FailOnError(err, "Filed to close channel")
+    err = r.connection.Close()
+	utils.FailOnError(err, "Filed to close connection")
 }

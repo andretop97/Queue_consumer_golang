@@ -1,37 +1,21 @@
 package main
 
 import (
-	"fmt"
-	"log"
+	"errors"
 
 	"github.com/andretop97/Queue_consumer_golang/src/consumer"
-	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/andretop97/Queue_consumer_golang/src/logger"
+	"github.com/andretop97/Queue_consumer_golang/src/utils"
 )
 
-func failOnError(err error, msg string) {
-	if err != nil {
-		log.Panicf("%s: %s", msg, err)
-	}
+func handler(Body string) error {
+	return errors.New("Só um erro")
 }
-
-
-func batata(Body string) error {
-	fmt.Println(Body)
-	return nil
-}
-
 func main() {
-	conn, err := amqp.Dial("amqp://exemple:1234@localhost:5672/")
-	failOnError(err, "Failed to connect to RabbitMQ")
-	defer conn.Close()
-
-	ch, err := conn.Channel()
-	failOnError(err, "Failed to open a channel")
-	defer ch.Close()
+	logger.SetLoggerSettings()
 	consumer, err := consumer.NewRabbitMQConsumer("amqp://exemple:1234@localhost:5672/", "teste")
-	if err != nil{
-		fmt.Print(err)
-	}
+	defer consumer.StopConsumer()
 
-	consumer.Consume(batata)
+	utils.FailOnError(err, "Failed to create consumer")
+	consumer.Consume(handler)
 }
