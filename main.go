@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 
@@ -23,14 +22,18 @@ func getRabbitURLfromEnv() string {
 }
 
 func handler(Body string) error {
-	return errors.New("Só um erro")
+	fmt.Println(Body)
+	return nil
 }
 
 func main() {
 	utils.LoadEnv()
 	logger.SetLoggerSettings()
+
 	url := getRabbitURLfromEnv()
-	consumer, err := consumer.NewRabbitMQConsumer(url, "teste")
+	serviceName := utils.GetEnvOrDefault("SERVICE_NAME", "exemple")
+
+	consumer, err := consumer.NewRabbitMQConsumer(url, serviceName)
 	defer consumer.StopConsumer()
 
 	utils.FailOnError(err, "Failed to create consumer")
