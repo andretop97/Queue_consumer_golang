@@ -1,5 +1,5 @@
 package consumer
 
 type IConsumer interface {
-	Consume(handler func(message string) error) error
+	Consume(handler func(message string) error)
 }
