@@ -11,5 +11,5 @@ As filas armazenam as mensagens até que os consumidores as processem. Os consum
 
 ## Arquitetura de dead letter queue
 
-![Arquitetura da nossa dlq]("dlq.png")
+![Arquitetura da nossa dlq]("./dlq.png")
 
